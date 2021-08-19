@@ -7,9 +7,6 @@ Based off my previous Python solver.
 See https://liorsinai.github.io/coding/2020/07/27/sudoku-solver.html
 =#
 
-include("Sudoku.jl")
-using .Sudoku
-include("utils.jl")
 
 """
 solve_sudoku(grid::Matrix{Int}; all_solution=false)
@@ -51,7 +48,7 @@ function solve_sudoku(grid::Matrix{Int}; all_solutions::Bool=false)
                     for y in s.candidates[guess] # step 3. backtracking check point:
                         s_next = deepcopy(s)
                         place_and_erase!(s_next, guess[1], guess[2], y)
-                        solved = solve(s_next, depth+1)
+                        solved = solve(s_next, depth + 1)
                         if solved && !all_solutions
                             break # return 1 solution
                         end
@@ -67,11 +64,17 @@ function solve_sudoku(grid::Matrix{Int}; all_solutions::Bool=false)
     depth_max = 0
     solution_set = Matrix{Int}[]
 
-    solve(SudokuGrid(grid))
+    s = SudokuGrid(grid)
+    flush_candidates!(s)
+    err = check_possible(s)
+    if !err.isError
+        solve(SudokuGrid(grid))
+    end
 
     info = Dict(
         :calls => calls,
-        :depth_max => depth_max
+        :depth_max => depth_max,
+        :error => err
     )
     
     solution_set, info

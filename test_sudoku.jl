@@ -1,7 +1,9 @@
 
 using Test 
-
+include("utils.jl")
 using Revise
+Revise.includet("Sudoku.jl")
+using .Sudoku
 Revise.includet("sudoku_solver.jl")
 
 
@@ -81,17 +83,24 @@ end
 @testset "check_possible" begin
     # impossible
     puzzles = [
-        # From https://norvig.com/sudoku.html  -> column 4, no (1, 5, 6) possible because of triple 5-6 doubles and triple 1s
-        # ".....5.8....6.1.43..........1.5........1.6...3.......553.....61........4.........",   # need to flush candidates first
-        # obvious doubles
+        # no place for 5 
         "12.......34...............5...........5..........................................",  
+        # duplicate 1s
         "11.......34...............5......................................................",
+        "12.......14...............5......................................................",
     ]
     for puzzle_str in puzzles
         puzzle = str2grid(puzzle_str)
-        result, message = check_possible(SudokuGrid(puzzle))
-        @test !result
+        result = check_possible(SudokuGrid(puzzle))
+        @test result.isError
     end 
+    # From https://norvig.com/sudoku.html  -> column 4, no (1, 5, 6) possible because of triple 5-6 doubles and triple 1s
+    puzzle_str = ".....5.8....6.1.43..........1.5........1.6...3.......553.....61........4........."
+    puzzle = str2grid(puzzle_str)
+    s = SudokuGrid(puzzle)
+    flush_candidates!(s)  # else this will not work
+    result = check_possible(s)
+    @test result.isError
 end
 
 
@@ -141,7 +150,7 @@ end
 end
 
 
-@testset "check solved pzzule" begin
+@testset "check solved puzzle" begin
      # these puzzles were sovled with the solver. This is to check solutions still hold.
      puzzles = [
             # from https://dev.to/aspittel/how-i-finally-wrote-a-sudoku-solver-177g

@@ -12,7 +12,8 @@ module Sudoku
 export SudokuGrid,
     get_box, get_box_inds, 
     find_options, place_and_erase!,
-    get_unique,
+    get_unique, get_hidden_pairs,
+    flush_candidates!,
     check_done, check_possible
 
 
@@ -101,10 +102,18 @@ function place_and_erase!(s::SudokuGrid, r::Int, c::Int, x::Int; constraint_prop
             # apply strategies
             # 1. hidden singles
             uniques = get_unique(s, inds)
-            for (number, idx) in uniques
-                s.candidates[idx[1], idx[2]] = Set([number])
-                new_erased = erase!(s, [number], inds, [idx])
+            for (idx, unique_set) in uniques
+                s.candidates[idx[1], idx[2]] = copy(unique_set)
+                new_erased = erase!(s, collect(unique_set), inds, [idx])
                 push!(erased, new_erased...)
+            end
+            hidden_pairs = get_hidden_pairs(s, inds)
+            for (pair_inds, pair) in hidden_pairs
+                for idx in pair_inds
+                    s.candidates[idx[1], idx[2]] = copy(pair)
+                    new_erased = erase!(s, collect(pair), inds, pair_inds)
+                    push!(erased, new_erased...)
+                end
             end
         end
     end
@@ -137,7 +146,7 @@ function erase!(s::SudokuGrid, numbers::Vector{Int}, indices::Vector{Tuple{Int, 
     end
     erased
 end
-
+erase!(s::SudokuGrid, numbers::Vector{Int}, indices::Vector{Tuple{Int, Int}}) = erase!(s, numbers, indices, [])
 
 """
 candidates_map(s::SudokuGrid, indices)
@@ -146,7 +155,7 @@ map of candidates to indices where they are placeable in indices
 """
 function candidates_map(s::SudokuGrid, indices::Vector{Tuple{Int, Int}})
     n = size(s.grid, 1)
-    _map = [Tuple{Int, Int}[] for i in 1:9]
+    _map = [Tuple{Int, Int}[] for i in 1:n]
     for (i, j) in indices
         for number in s.candidates[i, j]
             push!(_map[number], (i, j))
@@ -158,14 +167,61 @@ end
 
 function get_unique(s::SudokuGrid, indices::Vector{Tuple{Int, Int}})
     groups = candidates_map(s, indices)
-    uniques = Dict{Int, Tuple{Int, Int}}()
+    uniques = Dict{Tuple{Int, Int}, Set{Int}}()
     for (number, indices_group) in enumerate(groups)
         if length(indices_group) == 1
-            uniques[number] = indices_group[1]
+            uniques[indices_group[1]] = Set([number])
         end
     end
     uniques
 end
+
+
+function get_hidden_pairs(s::SudokuGrid, indices::Vector{Tuple{Int, Int}})
+    groups = candidates_map(s, indices)
+    hidden_pairs = Dict{Vector{Tuple{Int, Int}}, Set{Int}}()
+    hideable = Dict(idx => (length(s.candidates[idx[1], idx[2]]) > 2) for idx in indices)
+    for num1 in 1:length(groups)
+        if length(groups[num1]) == 2
+            for num2 in (num1 + 1):length(groups)
+                g = groups[num1]
+                if g == groups[num2] && (hideable[g[1]] || hideable[g[2]]) 
+                    ## this is a pair and it is hidden
+                    hidden_pairs[g] = Set([num1, num2])
+                end
+            end
+        end
+    end
+    hidden_pairs
+end
+
+
+function flush_candidates!(s)
+    n = size(s.grid, 1)
+    rows = [[(i, j) for j in 1:n] for i in 1:n]
+    cols = [[(i, j) for i in 1:n] for j in 1:n]
+    boxes = Vector{Tuple{Int, Int}}[]
+    for i0 in 1:BOX_SIZE:n
+        for j0 in 1:BOX_SIZE:n
+            push!(boxes, get_box_inds(s, i0, j0))
+        end
+    end
+    for inds in vcat(rows, cols, boxes)
+        uniques = get_unique(s, inds)
+        for (idx, unique_set) in uniques
+            s.candidates[idx[1], idx[2]] = copy(unique_set)
+            erase!(s, collect(unique_set), inds, [idx])
+        end
+        hidden_pairs = get_hidden_pairs(s, inds)
+        for (pair_inds, pair) in hidden_pairs
+            for idx in pair_inds
+                s.candidates[idx[1], idx[2]] = copy(pair)
+                erase!(s, collect(pair), inds, pair_inds)
+            end
+        end
+    end
+end
+
 
 
 ##### ----------------------------  end game functions ---------------------------- ##### 
@@ -218,6 +274,14 @@ end
 
 
 ##### ----------------------------  check possible ---------------------------- ##### 
+
+struct SudokuError
+    isError::Bool
+    message::String
+    inds::Vector{Tuple{Int, Int}}
+end
+
+
 function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
     grid_size = size(s.grid, 1)
     # check rows
@@ -225,7 +289,9 @@ function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
         counts = get_counts(s.grid[i, :])
         if any(counts .> 1) # there's a duplicate
             number = findfirst(counts .> 1)
-            return false, "$number found multiple times in row $i"
+            msg = "$number found multiple times in row $i"
+            inds = [(i, j) for j in findall(s.grid[i, :] .== number)]
+            return SudokuError(true, msg, inds)
         end
         nums = Int[]
         for j in  1:grid_size
@@ -234,7 +300,9 @@ function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
         counts = get_counts(nums)
         if any(counts .== 0) # no way to place this value in this row
             number = findfirst(counts .== 0)
-            return false, "$number cannot be placed in row $i"
+            msg = "$number cannot be placed in row $i"
+            inds = [(i, j) for j in 1:grid_size]
+            return  SudokuError(true, msg, inds)
         end
     end
     # check columns
@@ -242,7 +310,9 @@ function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
         counts = get_counts(s.grid[:, j])
         if any(counts .> 1) # there's a duplicate
             number = findfirst(counts .> 1)
-            return false, "$number found multiple times in col $j"
+            msg = "$number found multiple times in column $j"
+            inds = [(i, j) for i in findall(s.grid[:, j] .== number)]
+            return SudokuError(true, msg, inds)
         end
         nums = Int[]
         for i in 1:grid_size
@@ -251,16 +321,20 @@ function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
         counts = get_counts(nums)
         if any(counts .== 0) # no way to place this value in this row
             number = findfirst(counts .== 0)
-            return false, "$number cannot be placed in col $i"
+            msg = "$number cannot be placed in column $j"
+            inds = [(i, j) for i in 1:grid_size]
+            return SudokuError(true, msg, inds)
         end
     end
-    # check columns
+    # check boxes
     for i0 in 1:box_size:grid_size
         for j0 in 1:box_size:grid_size
             counts = get_counts(get_box(s, i0, j0))
             if any(counts .> 1) # there's a duplicate
                 number = findfirst(counts .> 1)
-                return false, "$number found multiple times in box ($i0, $j0)"
+                msg = "$number found multiple times in box ($i0, $j0)"
+                inds = [(i, j) for (i, j) in get_box_inds(s, i0, j0) if s.grid[i, j] == number]
+                return SudokuError(true, msg, inds)
             end
             nums = Int[]
             for i in i0:(i0 + box_size - 1)
@@ -271,11 +345,13 @@ function check_possible(s::SudokuGrid; box_size=BOX_SIZE)
             counts = get_counts(nums)
             if any(counts .== 0) # no way to place this value in this row
                 number = findfirst(counts .== 0)
-                return false, "$number cannot be placed in box ($i0, $j0)"
+                msg = "$number cannot be placed in box ($i0, $j0)"
+                inds =  get_box_inds(s, i0, j0)
+                return SudokuError(true, msg, inds)
             end
         end
     end
-    return true, ""
+    return SudokuError(false, "", [])
 end
 
 
