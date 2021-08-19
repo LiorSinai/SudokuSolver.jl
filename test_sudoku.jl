@@ -2,8 +2,8 @@
 using Test 
 include("utils.jl")
 using Revise
-Revise.includet("Sudoku.jl")
-using .Sudoku
+Revise.includet("Sudokus.jl")
+using .Sudokus
 Revise.includet("sudoku_solver.jl")
 
 
@@ -91,13 +91,13 @@ end
     ]
     for puzzle_str in puzzles
         puzzle = str2grid(puzzle_str)
-        result = check_possible(SudokuGrid(puzzle))
+        result = check_possible(Sudoku(puzzle))
         @test result.isError
     end 
     # From https://norvig.com/sudoku.html  -> column 4, no (1, 5, 6) possible because of triple 5-6 doubles and triple 1s
     puzzle_str = ".....5.8....6.1.43..........1.5........1.6...3.......553.....61........4........."
     puzzle = str2grid(puzzle_str)
-    s = SudokuGrid(puzzle)
+    s = Sudoku(puzzle)
     flush_candidates!(s)  # else this will not work
     result = check_possible(s)
     @test result.isError
